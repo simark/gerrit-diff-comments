@@ -290,11 +290,14 @@ changes = server.get_changes()
 # Make it a dict index by change number
 changes = {change.number: change for change in changes}
 
-print("Enter a change number")
-change_number = read_int()
+if len(sys.argv) >= 2:
+    change_number = int(sys.argv[1])
+else:
+    print("Enter a change number")
+    change_number = read_int()
 
 if change_number not in changes:
-    raise Exception("This change does not exist.")
+    raise Exception("Change {} does not exist.".format(change_number))
 
 change = changes[change_number]
 
