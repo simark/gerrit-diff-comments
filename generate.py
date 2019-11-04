@@ -6,6 +6,7 @@ import sys
 import urllib.parse
 import textwrap
 from collections import OrderedDict
+from pprint import pprint
 
 
 class Project:
@@ -159,11 +160,21 @@ class Diff:
     def content(self):
         return self._content
 
+    @property
+    def path_a(self):
+        return self._path_a
+
+    @property
+    def path_b(self):
+        return self._path_b
+
     @classmethod
     def from_raw(cls, raw):
         diff = cls()
 
         diff._content = raw["content"]
+        diff._path_a = raw["meta_a"]["name"]
+        diff._path_b = raw["meta_b"]["name"]
 
         return diff
 
@@ -174,7 +185,7 @@ class Server:
 
     def _json_query(self, path):
         url = "{}/{}".format(self._base_addr, path)
-        print("Getting {}".format(url))
+        # print("Getting {}".format(url))
         text = requests.get(url).text
         text = text[5:]
         return json.loads(text)
@@ -322,53 +333,96 @@ message = choose(
 comments_by_revision = server.get_change_message_comments(change, message)
 
 
-def maybe_print_comment(line_number, comments):
-    comment = comments.get(line_number, None)
-
-    if comment is None:
-        return
-
+def print_comment(comment):
     print()
     # print("{} {}".format(where, comment.line))
     print(textwrap.fill(comment.message))
     print()
 
 
-def render_diff_with_comments(diff, comments):
-    assert type(comments) is list
+def render_diff(diff):
+    diff_lines = []
 
-    comments_on_base = {x.line: x for x in comments if x.side == "PARENT"}
-    comments_on_rev = {x.line: x for x in comments if x.side == "REVISION"}
-
-    line_number_a = 1
-    line_number_b = 1
+    # Maps line numbers of files A/B (1-based) to the corresponding index
+    # (0-based) in diff_lines.
+    #
+    # The index 0 in these list is unused (there is no line number 0), so set
+    # it to -1 to ensure it's not used as an index.
+    line_mapping_a_to_diff = [-1]
+    line_mapping_b_to_diff = [-1]
 
     for chunk in diff.content:
         if "ab" in chunk:
             for line in chunk["ab"]:
-                print("  {:4} {:4} {}".format(line_number_a, line_number_b, line))
+                diff_lines.append(
+                    {
+                        "line": " {}".format(line),
+                        "a": len(line_mapping_a_to_diff),
+                        "b": len(line_mapping_b_to_diff),
+                    }
+                )
 
-                maybe_print_comment(line_number_a, comments_on_base)
-                maybe_print_comment(line_number_b, comments_on_rev)
-
-                line_number_a += 1
-                line_number_b += 1
+                line_mapping_a_to_diff.append(len(diff_lines) - 1)
+                line_mapping_b_to_diff.append(len(diff_lines) - 1)
 
         if "a" in chunk:
             for line in chunk["a"]:
-                print("- {:4} {:4} {}".format(line_number_a, "", line))
+                diff_lines.append(
+                    {"line": "-{}".format(line), "a": len(line_mapping_a_to_diff),}
+                )
 
-                maybe_print_comment(line_number_a, comments_on_base)
-
-                line_number_a += 1
+                line_mapping_a_to_diff.append(len(diff_lines) - 1)
 
         if "b" in chunk:
             for line in chunk["b"]:
-                print("+ {:4} {:4} {}".format("", line_number_b, line))
+                diff_lines.append(
+                    {"line": "+{}".format(line), "b": len(line_mapping_b_to_diff),}
+                )
 
-                maybe_print_comment(line_number_b, comments_on_rev)
+                line_mapping_b_to_diff.append(len(diff_lines) - 1)
 
-                line_number_b += 1
+    return diff_lines, line_mapping_a_to_diff, line_mapping_b_to_diff
+
+
+def render_diff_with_comments(diff, comments):
+    assert type(comments) is list
+
+    print("Comments on {}:".format(diff.path_b))
+    print()
+
+    diff_lines, line_mapping_a_to_diff, line_mapping_b_to_diff = render_diff(diff)
+
+    for comment in comments:
+        if comment.side == "PARENT":
+            idx_in_diff = line_mapping_a_to_diff[comment.line]
+        else:
+            assert comment.side == "REVISION"
+            idx_in_diff = line_mapping_b_to_diff[comment.line]
+
+        low = max(0, idx_in_diff - 10)
+        high = min(len(diff_lines) - 1, idx_in_diff + 10)
+        diff_slice = diff_lines[low:high]
+
+        for diff_line in diff_slice:
+            print("{:4} {:4} | {}".format(diff_line.get('a', ''), diff_line.get('b', ''), diff_line["line"]))
+
+            if (
+                comment.side == "PARENT"
+                and "a" in diff_line
+                and diff_line["a"] == comment.line
+            ):
+                print_comment(comment)
+
+            if (
+                comment.side == "REVISION"
+                and "b" in diff_line
+                and diff_line["b"] == comment.line
+            ):
+                print_comment(comment)
+
+        print()
+        print("---")
+        print()
 
 
 for (revision, comments_by_path) in comments_by_revision.items():
