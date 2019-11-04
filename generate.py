@@ -8,7 +8,7 @@ import textwrap
 from collections import OrderedDict
 
 
-class GerritProject:
+class Project:
     def __init__(self, name):
         self._name = name
 
@@ -21,7 +21,7 @@ class GerritProject:
         return cls(name)
 
     def __str__(self):
-        return "<GerritProject {}>".format(self.name)
+        return "<Project {}>".format(self.name)
 
     def __repr__(self):
         return str(self)
@@ -168,7 +168,7 @@ class Diff:
         return diff
 
 
-class GerritServer:
+class Server:
     def __init__(self, base_addr):
         self._base_addr = base_addr
 
@@ -184,7 +184,7 @@ class GerritServer:
         projects = []
 
         for (name, proj_raw) in raw.items():
-            projects.append(GerritProject.from_raw(name, proj_raw))
+            projects.append(Project.from_raw(name, proj_raw))
 
         return projects
 
@@ -283,7 +283,7 @@ def choose(items, key_func, render_func):
             print("Invalid choice.")
 
 
-server = GerritServer("https://gnutoolchain-gerrit.osci.io/r")
+server = Server("https://gnutoolchain-gerrit.osci.io/r")
 
 changes = server.get_changes()
 
