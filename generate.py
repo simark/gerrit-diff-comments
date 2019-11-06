@@ -128,6 +128,10 @@ class Comment:
     def line(self):
         return self._line
 
+    @property
+    def path(self):
+        return self._path
+
     @classmethod
     def from_raw(cls, raw, path=None):
         comment = cls()
@@ -173,8 +177,16 @@ class Diff:
         diff = cls()
 
         diff._content = raw["content"]
-        diff._path_a = raw["meta_a"]["name"]
-        diff._path_b = raw["meta_b"]["name"]
+
+        if "meta_a" in raw:
+            diff._path_a = raw["meta_a"]["name"]
+        else:
+            diff._path_a = None
+
+        if "meta_b" in raw:
+            diff._path_b = raw["meta_b"]["name"]
+        else:
+            diff._path_b = None
 
         return diff
 
@@ -189,6 +201,10 @@ class Server:
         text = requests.get(url).text
         text = text[5:]
         return json.loads(text)
+
+    @property
+    def base_addr(self):
+        return self._base_addr
 
     def get_projects(self):
         raw = self._json_query("projects/")
@@ -294,18 +310,20 @@ def choose(items, key_func, render_func):
             print("Invalid choice.")
 
 
-server = Server("https://gnutoolchain-gerrit.osci.io/r")
+if len(sys.argv) != 3:
+    print("Usage: ./generate.py [server base address] [change number]")
+    print()
+    print("Example: ./generate.py 'https://gnutoolchain-gerrit.osci.io/r' 483")
+    sys.exit(1)
+
+server = Server(sys.argv[1])
 
 changes = server.get_changes()
 
 # Make it a dict index by change number
 changes = {change.number: change for change in changes}
 
-if len(sys.argv) >= 2:
-    change_number = int(sys.argv[1])
-else:
-    print("Enter a change number")
-    change_number = read_int()
+change_number = int(sys.argv[2])
 
 if change_number not in changes:
     raise Exception("Change {} does not exist.".format(change_number))
@@ -333,10 +351,30 @@ message = choose(
 comments_by_revision = server.get_change_message_comments(change, message)
 
 
-def print_comment(comment):
+def print_comment(server, change, comment, revision):
     print()
     # print("{} {}".format(where, comment.line))
-    print(textwrap.fill(comment.message))
+    # print(
+    #    "{}/c/{}/+/{}/{}/{}@{}".format(
+    #        server.base_addr,
+    #        change.project,
+    #        change.number,
+    #        revision,
+    #        comment.path,
+    #        comment.line,
+    #    )
+    # )
+    print("PS{}, Line {}:".format(revision, comment.line))
+    print()
+
+    comment_lines = comment.message.splitlines()
+
+    for line in comment_lines:
+        if line.startswith(">") or line.startswith(" "):
+            print(line)
+        else:
+            print(textwrap.fill(line))
+
     print()
 
 
@@ -384,7 +422,7 @@ def render_diff(diff):
     return diff_lines, line_mapping_a_to_diff, line_mapping_b_to_diff
 
 
-def render_diff_with_comments(diff, comments):
+def render_diff_with_comments(server, diff, comments, revision):
     assert type(comments) is list
 
     print("Comments on {}:".format(diff.path_b))
@@ -404,21 +442,25 @@ def render_diff_with_comments(diff, comments):
         diff_slice = diff_lines[low:high]
 
         for diff_line in diff_slice:
-            print("{:4} {:4} | {}".format(diff_line.get('a', ''), diff_line.get('b', ''), diff_line["line"]))
+            print(
+                "{:4} {:4} | {}".format(
+                    diff_line.get("a", ""), diff_line.get("b", ""), diff_line["line"]
+                )
+            )
 
             if (
                 comment.side == "PARENT"
                 and "a" in diff_line
                 and diff_line["a"] == comment.line
             ):
-                print_comment(comment)
+                print_comment(server, change, comment, revision)
 
             if (
                 comment.side == "REVISION"
                 and "b" in diff_line
                 and diff_line["b"] == comment.line
             ):
-                print_comment(comment)
+                print_comment(server, change, comment, revision)
 
         print()
         print("---")
@@ -428,4 +470,6 @@ def render_diff_with_comments(diff, comments):
 for (revision, comments_by_path) in comments_by_revision.items():
     for (path, comment_for_path) in comments_by_path.items():
         diff_from_base_to_rev = server.get_diff(change, revision, path)
-        render_diff_with_comments(diff_from_base_to_rev, comment_for_path)
+        render_diff_with_comments(
+            server, diff_from_base_to_rev, comment_for_path, revision
+        )
