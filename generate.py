@@ -351,20 +351,7 @@ message = choose(
 comments_by_revision = server.get_change_message_comments(change, message)
 
 
-def print_comment(server, change, comment, revision):
-    print()
-    # print("{} {}".format(where, comment.line))
-    # print(
-    #    "{}/c/{}/+/{}/{}/{}@{}".format(
-    #        server.base_addr,
-    #        change.project,
-    #        change.number,
-    #        revision,
-    #        comment.path,
-    #        comment.line,
-    #    )
-    # )
-
+def print_comment(comment, revision):
     if comment.line is None:
         print("PS{}:".format(revision))
     else:
@@ -380,8 +367,6 @@ def print_comment(server, change, comment, revision):
             print(line)
         else:
             print(textwrap.fill(line))
-
-    print()
 
 
 def render_diff(diff):
@@ -428,71 +413,114 @@ def render_diff(diff):
     return diff_lines, line_mapping_a_to_diff, line_mapping_b_to_diff
 
 
+def print_one_diff_line(diff, diff_line):
+    if diff.path_a is None:
+        # File added
+        print("{:4} | ".format(diff_line["b"]), end="")
+    elif diff.path_b is None:
+        # File removed
+        print("{:4} | ".format(diff_line["a"]), end="")
+    else:
+        # File modified
+        print(
+            "{:4} {:4} | ".format(diff_line.get("a", ""), diff_line.get("b", "")),
+            end="",
+        )
+
+    print(diff_line["line"])
+
+
+def print_comments_matching_diff_line(comments, diff_line, revision):
+    for comment in comments:
+        if (
+            comment.side == "PARENT"
+            and "a" in diff_line
+            and diff_line["a"] == comment.line
+        ):
+            print()
+            print_comment(comment, revision)
+            print()
+
+        if (
+            comment.side == "REVISION"
+            and "b" in diff_line
+            and diff_line["b"] == comment.line
+        ):
+            print()
+            print_comment(comment, revision)
+            print()
+
+
 def render_diff_with_comments(server, diff, comments, revision):
     assert type(comments) is list
 
     if diff.path_a is not None:
         print("--- {}".format(diff.path_a))
+    else:
+        print("--- /dev/null")
 
     if diff.path_b is not None:
         print("+++ {}".format(diff.path_b))
+    else:
+        print("+++ /dev/null")
 
     print()
 
     diff_lines, line_mapping_a_to_diff, line_mapping_b_to_diff = render_diff(diff)
 
-    for comment in comments:
-        if comment.line is None:
-            # It's a file comment.
-            print_comment(server, change, comment, revision)
-            continue
-
-        # It's a line (single line or range) comment.
+    def comment_to_diff_idx(comment):
         if comment.side == "PARENT":
-            idx_in_diff = line_mapping_a_to_diff[comment.line]
+            return line_mapping_a_to_diff[comment.line]
         else:
             assert comment.side == "REVISION"
-            idx_in_diff = line_mapping_b_to_diff[comment.line]
+            return line_mapping_b_to_diff[comment.line]
 
-        low = max(0, idx_in_diff - 10)
+    diff_line_ranges_to_print = []
+
+    for comment in comments:
+        if comment.line is None:
+            # It's a file comment, doesn't matter for ranges.
+            continue
+
+        idx_in_diff = comment_to_diff_idx(comment)
+
+        # We want to print at least from this point.
+        low = max(0, idx_in_diff - 9)
+
+        # And up to this point (exclusive).
         high = min(len(diff_lines) - 1, idx_in_diff + 10)
-        diff_slice = diff_lines[low:high]
+
+        if len(diff_line_ranges_to_print) == 0:
+            diff_line_ranges_to_print.append((low, high))
+        else:
+            prev_range = diff_line_ranges_to_print[-1]
+            if prev_range[1] >= low:
+                # Overlap (or contiguous) with prev range, merge.
+                diff_line_ranges_to_print[-1] = (prev_range[0], high)
+            else:
+                # Disjoint from prev range.
+                diff_line_ranges_to_print.append((low, high))
+
+    # First, print any file-level comments.
+    for comment in comments:
+        if comment.line is None:
+            print_comment(comment, revision)
+            print()
+            continue
+
+    # Print all diff ranges we want to print, with comments matching those lines.
+    for i, diff_range in enumerate(diff_line_ranges_to_print):
+        diff_slice = diff_lines[diff_range[0] : diff_range[1]]
 
         for diff_line in diff_slice:
-            if diff.path_a is None:
-                # File added
-                print("{:4} | ".format(diff_line["b"]), end="")
-            elif diff.path_b is None:
-                # File removed
-                print("{:4} | ".format(diff_line["a"]), end="")
-            else:
-                # File modified
-                print(
-                    "{:4} {:4} | ".format(
-                        diff_line.get("a", ""), diff_line.get("b", "")
-                    ),
-                    end="",
-                )
-
-            print(diff_line["line"])
-
-            # Print any comment at this line.
-            if (
-                comment.side == "PARENT"
-                and "a" in diff_line
-                and diff_line["a"] == comment.line
-            ):
-                print_comment(server, change, comment, revision)
-
-            if (
-                comment.side == "REVISION"
-                and "b" in diff_line
-                and diff_line["b"] == comment.line
-            ):
-                print_comment(server, change, comment, revision)
+            print_one_diff_line(diff, diff_line)
+            print_comments_matching_diff_line(comments, diff_line, revision)
 
         print()
-        print()
+
+        if i != len(diff_line_ranges_to_print) - 1:
+            print(" ...")
+            print()
 
 
 for (revision, comments_by_path) in comments_by_revision.items():
