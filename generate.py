@@ -364,7 +364,12 @@ def print_comment(server, change, comment, revision):
     #        comment.line,
     #    )
     # )
-    print("PS{}, Line {}:".format(revision, comment.line))
+
+    if comment.line is None:
+        print("PS{}:".format(revision))
+    else:
+        print("PS{}, Line {}:".format(revision, comment.line))
+
     print()
 
     comment_lines = comment.message.splitlines()
@@ -425,12 +430,20 @@ def render_diff(diff):
 def render_diff_with_comments(server, diff, comments, revision):
     assert type(comments) is list
 
-    print("Comments on {}:".format(diff.path_b))
+    print("Comments on:")
     print()
+    print("- {}".format(diff.path_a))
+    print("+ {}".format(diff.path_b))
 
     diff_lines, line_mapping_a_to_diff, line_mapping_b_to_diff = render_diff(diff)
 
     for comment in comments:
+        if comment.line is None:
+            # It's a file comment.
+            print_comment(server, change, comment, revision)
+            continue
+
+        # It's a line (single line or range) comment.
         if comment.side == "PARENT":
             idx_in_diff = line_mapping_a_to_diff[comment.line]
         else:
