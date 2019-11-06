@@ -413,17 +413,28 @@ def render_diff(diff):
     return diff_lines, line_mapping_a_to_diff, line_mapping_b_to_diff
 
 
-def print_one_diff_line(diff, diff_line):
+def print_one_diff_line(diff, diff_line, num_width_a, num_width_b):
     if diff.path_a is None:
         # File added
-        print("{:4} | ".format(diff_line["b"]), end="")
+        print(
+            "{b:{num_width_b}} | ".format(b=diff_line["b"], num_width_b=num_width_b),
+            end="",
+        )
     elif diff.path_b is None:
         # File removed
-        print("{:4} | ".format(diff_line["a"]), end="")
+        print(
+            "{a:{num_width_a}} | ".format(a=diff_line["a"], num_width_a=num_width_a),
+            end="",
+        )
     else:
         # File modified
         print(
-            "{:4} {:4} | ".format(diff_line.get("a", ""), diff_line.get("b", "")),
+            "{a:{num_width_a}} {b:{num_width_b}} | ".format(
+                a=diff_line.get("a", ""),
+                b=diff_line.get("b", ""),
+                num_width_a=num_width_a,
+                num_width_b=num_width_b,
+            ),
             end="",
         )
 
@@ -509,11 +520,26 @@ def render_diff_with_comments(server, diff, comments, revision):
             continue
 
     # Print all diff ranges we want to print, with comments matching those lines.
-    for i, diff_range in enumerate(diff_line_ranges_to_print):
-        diff_slice = diff_lines[diff_range[0] : diff_range[1]]
+    for i, (low, high) in enumerate(diff_line_ranges_to_print):
+        diff_slice = diff_lines[low:high]
+
+        # Figure out the maximal line number for a and b we'll need to display
+        # in this range
+        max_a_line = 0
+        max_b_line = 0
 
         for diff_line in diff_slice:
-            print_one_diff_line(diff, diff_line)
+            if "a" in diff_line:
+                max_a_line = max(max_a_line, diff_line["a"])
+
+            if "b" in diff_line:
+                max_b_line = max(max_b_line, diff_line["b"])
+
+        num_width_a = len(str(max_a_line))
+        num_width_b = len(str(max_b_line))
+
+        for diff_line in diff_slice:
+            print_one_diff_line(diff, diff_line, num_width_a, num_width_b)
             print_comments_matching_diff_line(comments, diff_line, revision)
 
         print()
