@@ -375,6 +375,7 @@ def print_comment(server, change, comment, revision):
     comment_lines = comment.message.splitlines()
 
     for line in comment_lines:
+        # Don't wrap lines that are quotes or code blocks (which start with a space)
         if line.startswith(">") or line.startswith(" "):
             print(line)
         else:
@@ -411,7 +412,7 @@ def render_diff(diff):
         if "a" in chunk:
             for line in chunk["a"]:
                 diff_lines.append(
-                    {"line": "-{}".format(line), "a": len(line_mapping_a_to_diff),}
+                    {"line": "-{}".format(line), "a": len(line_mapping_a_to_diff)}
                 )
 
                 line_mapping_a_to_diff.append(len(diff_lines) - 1)
@@ -419,7 +420,7 @@ def render_diff(diff):
         if "b" in chunk:
             for line in chunk["b"]:
                 diff_lines.append(
-                    {"line": "+{}".format(line), "b": len(line_mapping_b_to_diff),}
+                    {"line": "+{}".format(line), "b": len(line_mapping_b_to_diff)}
                 )
 
                 line_mapping_b_to_diff.append(len(diff_lines) - 1)
@@ -430,10 +431,13 @@ def render_diff(diff):
 def render_diff_with_comments(server, diff, comments, revision):
     assert type(comments) is list
 
-    print("Comments on:")
+    if diff.path_a is not None:
+        print("--- {}".format(diff.path_a))
+
+    if diff.path_b is not None:
+        print("+++ {}".format(diff.path_b))
+
     print()
-    print("- {}".format(diff.path_a))
-    print("+ {}".format(diff.path_b))
 
     diff_lines, line_mapping_a_to_diff, line_mapping_b_to_diff = render_diff(diff)
 
@@ -455,12 +459,24 @@ def render_diff_with_comments(server, diff, comments, revision):
         diff_slice = diff_lines[low:high]
 
         for diff_line in diff_slice:
-            print(
-                "{:4} {:4} | {}".format(
-                    diff_line.get("a", ""), diff_line.get("b", ""), diff_line["line"]
+            if diff.path_a is None:
+                # File added
+                print("{:4} | ".format(diff_line["b"]), end="")
+            elif diff.path_b is None:
+                # File removed
+                print("{:4} | ".format(diff_line["a"]), end="")
+            else:
+                # File modified
+                print(
+                    "{:4} {:4} | ".format(
+                        diff_line.get("a", ""), diff_line.get("b", "")
+                    ),
+                    end="",
                 )
-            )
 
+            print(diff_line["line"])
+
+            # Print any comment at this line.
             if (
                 comment.side == "PARENT"
                 and "a" in diff_line
@@ -476,7 +492,6 @@ def render_diff_with_comments(server, diff, comments, revision):
                 print_comment(server, change, comment, revision)
 
         print()
-        print("---")
         print()
 
 
