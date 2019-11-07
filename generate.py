@@ -388,6 +388,8 @@ def render_diff(diff):
                         "line": " {}".format(line),
                         "a": len(line_mapping_a_to_diff),
                         "b": len(line_mapping_b_to_diff),
+                        "line-num-a": len(line_mapping_a_to_diff),
+                        "line-num-b": len(line_mapping_b_to_diff),
                     }
                 )
 
@@ -397,7 +399,12 @@ def render_diff(diff):
         if "a" in chunk:
             for line in chunk["a"]:
                 diff_lines.append(
-                    {"line": "-{}".format(line), "a": len(line_mapping_a_to_diff)}
+                    {
+                        "line": "-{}".format(line),
+                        "a": len(line_mapping_a_to_diff),
+                        "line-num-a": len(line_mapping_a_to_diff),
+                        "line-num-b": len(line_mapping_b_to_diff),
+                    }
                 )
 
                 line_mapping_a_to_diff.append(len(diff_lines) - 1)
@@ -405,7 +412,12 @@ def render_diff(diff):
         if "b" in chunk:
             for line in chunk["b"]:
                 diff_lines.append(
-                    {"line": "+{}".format(line), "b": len(line_mapping_b_to_diff)}
+                    {
+                        "line": "+{}".format(line),
+                        "b": len(line_mapping_b_to_diff),
+                        "line-num-a": len(line_mapping_a_to_diff),
+                        "line-num-b": len(line_mapping_b_to_diff),
+                    }
                 )
 
                 line_mapping_b_to_diff.append(len(diff_lines) - 1)
@@ -414,31 +426,34 @@ def render_diff(diff):
 
 
 def print_one_diff_line(diff, diff_line, num_width_a, num_width_b):
-    if diff.path_a is None:
-        # File added
-        print(
-            "{b:{num_width_b}} | ".format(b=diff_line["b"], num_width_b=num_width_b),
-            end="",
-        )
-    elif diff.path_b is None:
-        # File removed
-        print(
-            "{a:{num_width_a}} | ".format(a=diff_line["a"], num_width_a=num_width_a),
-            end="",
-        )
-    else:
-        # File modified
-        print(
-            "{a:{num_width_a}} {b:{num_width_b}} | ".format(
-                a=diff_line.get("a", ""),
-                b=diff_line.get("b", ""),
-                num_width_a=num_width_a,
-                num_width_b=num_width_b,
-            ),
-            end="",
-        )
+    # Keep this around because it's useful for debugging.
+    print_line_number_prefix = False
+    if print_line_number_prefix:
+        if diff.path_a is None:
+            # File added
+            print(
+                "{b:{num_width_b}} ".format(b=diff_line["b"], num_width_b=num_width_b),
+                end="",
+            )
+        elif diff.path_b is None:
+            # File removed
+            print(
+                "{a:{num_width_a}} ".format(a=diff_line["a"], num_width_a=num_width_a),
+                end="",
+            )
+        else:
+            # File modified
+            print(
+                "{a:{num_width_a}} {b:{num_width_b}} ".format(
+                    a=diff_line.get("a", ""),
+                    b=diff_line.get("b", ""),
+                    num_width_a=num_width_a,
+                    num_width_b=num_width_b,
+                ),
+                end="",
+            )
 
-    print(diff_line["line"])
+    print("> {}".format(diff_line["line"]))
 
 
 def print_comments_matching_diff_line(comments, diff_line, revision):
@@ -462,20 +477,40 @@ def print_comments_matching_diff_line(comments, diff_line, revision):
             print()
 
 
+def print_range_header(diff_slice):
+    """Print a hunk-like header that indicates where the following
+    lines come from in a and b versions of the file."""
+    line_start_a = diff_slice[0]["line-num-a"]
+    line_start_b = diff_slice[0]["line-num-b"]
+    num_lines_a = 0
+    num_lines_b = 0
+
+    for diff_line in diff_slice:
+        if "a" in diff_line:
+            num_lines_a += 1
+
+        if "b" in diff_line:
+            num_lines_b += 1
+
+    print(
+        "> @@ -{},{} +{},{} @@".format(
+            line_start_a, num_lines_a, line_start_b, num_lines_b
+        )
+    )
+
+
 def render_diff_with_comments(server, diff, comments, revision):
     assert type(comments) is list
 
     if diff.path_a is not None:
-        print("--- {}".format(diff.path_a))
+        print("> --- {}".format(diff.path_a))
     else:
-        print("--- /dev/null")
+        print("> --- /dev/null")
 
     if diff.path_b is not None:
-        print("+++ {}".format(diff.path_b))
+        print("> +++ {}".format(diff.path_b))
     else:
-        print("+++ /dev/null")
-
-    print()
+        print("> +++ /dev/null")
 
     diff_lines, line_mapping_a_to_diff, line_mapping_b_to_diff = render_diff(diff)
 
@@ -523,6 +558,8 @@ def render_diff_with_comments(server, diff, comments, revision):
     for i, (low, high) in enumerate(diff_line_ranges_to_print):
         diff_slice = diff_lines[low:high]
 
+        print_range_header(diff_slice)
+
         # Figure out the maximal line number for a and b we'll need to display
         # in this range
         max_a_line = 0
@@ -542,9 +579,8 @@ def render_diff_with_comments(server, diff, comments, revision):
             print_one_diff_line(diff, diff_line, num_width_a, num_width_b)
             print_comments_matching_diff_line(comments, diff_line, revision)
 
-        print()
-
         if i != len(diff_line_ranges_to_print) - 1:
+            print()
             print(" ...")
             print()
 
