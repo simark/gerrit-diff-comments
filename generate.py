@@ -215,6 +215,13 @@ class Server:
 
         return projects
 
+    def get_change(self, change_number):
+        raw = self._json_query("changes/?q=change:{}".format(change_number))
+        if len(raw) == 0:
+            return None
+
+        return Change.from_raw(raw[0])
+
     def get_changes(self):
         raw = self._json_query("changes/")
         changes = []
@@ -277,78 +284,6 @@ class Server:
         )
 
         return Diff.from_raw(raw)
-
-
-def read_int():
-    while True:
-        print("? ", end="")
-        sys.stdout.flush()
-        answer = sys.stdin.readline().strip()
-
-        try:
-            return int(answer)
-        except ValueError:
-            print("Can't parse {} as an integer.".format(answer))
-
-
-def choose(items, key_func, render_func):
-    by_key = {}
-
-    for item in items:
-        key = key_func(item)
-        text = render_func(item)
-        assert key not in by_key
-        by_key[key] = item
-
-        print("[{}] {}".format(key, text))
-
-    while True:
-        answer = read_int()
-        if answer in by_key:
-            return by_key[answer]
-        else:
-            print("Invalid choice.")
-
-
-if len(sys.argv) != 3:
-    print("Usage: ./generate.py [server base address] [change number]")
-    print()
-    print("Example: ./generate.py 'https://gnutoolchain-gerrit.osci.io/r' 483")
-    sys.exit(1)
-
-server = Server(sys.argv[1])
-
-changes = server.get_changes()
-
-# Make it a dict index by change number
-changes = {change.number: change for change in changes}
-
-change_number = int(sys.argv[2])
-
-if change_number not in changes:
-    raise Exception("Change {} does not exist.".format(change_number))
-
-change = changes[change_number]
-
-messages = server.get_change_messages(change)
-
-
-class Count:
-    def __init__(self):
-        self._n = 0
-
-    def __call__(self, item):
-        self._n += 1
-        return self._n
-
-
-messages = sorted(messages, key=lambda m: m.date)
-message = choose(
-    messages, Count(), lambda m: "By {} at {}".format(m.author.name, m.date)
-)
-
-# Look for code comments that were posted along this message.
-comments_by_revision = server.get_change_message_comments(change, message)
 
 
 def print_comment(comment, revision):
@@ -623,9 +558,106 @@ def render_diff_with_comments(server, diff, comments, revision):
             print()
 
 
-for (revision, comments_by_path) in comments_by_revision.items():
-    for (path, comment_for_path) in comments_by_path.items():
-        diff_from_base_to_rev = server.get_diff(change, revision, path)
-        render_diff_with_comments(
-            server, diff_from_base_to_rev, comment_for_path, revision
+def read_int():
+    while True:
+        print("? ", end="")
+        sys.stdout.flush()
+        answer = sys.stdin.readline().strip()
+
+        try:
+            return int(answer)
+        except ValueError:
+            print("Can't parse {} as an integer.".format(answer))
+
+
+def choose(items, key_func, render_func):
+    by_key = {}
+
+    for item in items:
+        key = key_func(item)
+        text = render_func(item)
+        assert key not in by_key
+        by_key[key] = item
+
+        print("[{}] {}".format(key, text))
+
+    while True:
+        answer = read_int()
+        if answer in by_key:
+            return by_key[answer]
+        else:
+            print("Invalid choice.")
+
+
+def main():
+    if len(sys.argv) not in (3, 5):
+        print("Invalid number of parameters.")
+        print()
+        print("Interactive usage: ./generate.py [server base address] [change number]")
+        print(
+            "Unattended usage:  ./generate.py [server base address] [change number] [author id] [comment timestamp]"
         )
+        print()
+        print("Examples:")
+        print("  ./generate.py 'https://gnutoolchain-gerrit.osci.io/r' 483")
+        print(
+            "  ./generate.py 'https://gnutoolchain-gerrit.osci.io/r' 483 1000025 \"2019-11-05 23:52:21.000000000\""
+        )
+        sys.exit(1)
+
+    interactive = len(sys.argv) == 3
+
+    server_address = sys.argv[1]
+    change_number = int(sys.argv[2])
+
+    server = Server(server_address)
+
+    change = server.get_change(change_number)
+    if change is None:
+        raise Exception("Change {} does not exist.".format(change_number))
+
+    messages = server.get_change_messages(change)
+    messages = sorted(messages, key=lambda m: m.date)
+
+    if interactive:
+
+        class Count:
+            def __init__(self):
+                self._n = 0
+
+            def __call__(self, item):
+                self._n += 1
+                return self._n
+
+        message = choose(
+            messages,
+            Count(),
+            lambda m: "By {} ({}) at '{}'".format(m.author.name, m.author.id, m.date),
+        )
+    else:
+        author_id = int(sys.argv[3])
+        timestamp = sys.argv[4]
+
+        for message in messages:
+            if message.author.id == author_id and message.date == timestamp:
+                break
+        else:
+            raise Exception(
+                "Could not find message corresponding to author {} and timestamp {}".format(
+                    author_id, timestamp
+                )
+            )
+
+    # Look for code comments that were posted along this message.
+    comments_by_revision = server.get_change_message_comments(change, message)
+
+    for (revision, comments_by_path) in comments_by_revision.items():
+        for (path, comment_for_path) in comments_by_path.items():
+            diff_from_base_to_rev = server.get_diff(change, revision, path)
+            render_diff_with_comments(
+                server, diff_from_base_to_rev, comment_for_path, revision
+            )
+
+
+if __name__ == "__main__":
+    main()
