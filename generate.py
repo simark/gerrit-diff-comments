@@ -369,6 +369,23 @@ def print_comment(comment, revision):
             print(textwrap.fill(line))
 
 
+def is_interesting_line_c(line):
+    if len(line) == 0:
+        return False
+
+    if line[0].isspace():
+        return False
+
+    if line in ("{", "}"):
+        return False
+
+    # Other ideas:
+    #
+    #   - skip things that look like labels, /^[a-zA-Z0-9_]+:$/
+    #   - skip preprocessor directives
+    return True
+
+
 def render_diff(diff):
     diff_lines = []
 
@@ -380,6 +397,10 @@ def render_diff(diff):
     line_mapping_a_to_diff = [-1]
     line_mapping_b_to_diff = [-1]
 
+    # Last line we've seen that is worthy of being used as context in range
+    # headers.
+    last_interesting_line = ""
+
     for chunk in diff.content:
         if "ab" in chunk:
             for line in chunk["ab"]:
@@ -388,13 +409,21 @@ def render_diff(diff):
                         "line": " {}".format(line),
                         "a": len(line_mapping_a_to_diff),
                         "b": len(line_mapping_b_to_diff),
+                        # If a range were to start at this line, what would be
+                        # the line number we would write in the header for each
+                        # of the files.  And what would be the context line
+                        # included in the header.
                         "line-num-a": len(line_mapping_a_to_diff),
                         "line-num-b": len(line_mapping_b_to_diff),
+                        "context": last_interesting_line,
                     }
                 )
 
                 line_mapping_a_to_diff.append(len(diff_lines) - 1)
                 line_mapping_b_to_diff.append(len(diff_lines) - 1)
+
+                if is_interesting_line_c(line):
+                    last_interesting_line = line
 
         if "a" in chunk:
             for line in chunk["a"]:
@@ -404,10 +433,14 @@ def render_diff(diff):
                         "a": len(line_mapping_a_to_diff),
                         "line-num-a": len(line_mapping_a_to_diff),
                         "line-num-b": len(line_mapping_b_to_diff),
+                        "context": last_interesting_line,
                     }
                 )
 
                 line_mapping_a_to_diff.append(len(diff_lines) - 1)
+
+                if is_interesting_line_c(line):
+                    last_interesting_line = line
 
         if "b" in chunk:
             for line in chunk["b"]:
@@ -417,10 +450,14 @@ def render_diff(diff):
                         "b": len(line_mapping_b_to_diff),
                         "line-num-a": len(line_mapping_a_to_diff),
                         "line-num-b": len(line_mapping_b_to_diff),
+                        "context": last_interesting_line,
                     }
                 )
 
                 line_mapping_b_to_diff.append(len(diff_lines) - 1)
+
+                if is_interesting_line_c(line):
+                    last_interesting_line = line
 
     return diff_lines, line_mapping_a_to_diff, line_mapping_b_to_diff
 
@@ -482,6 +519,7 @@ def print_range_header(diff_slice):
     lines come from in a and b versions of the file."""
     line_start_a = diff_slice[0]["line-num-a"]
     line_start_b = diff_slice[0]["line-num-b"]
+    context = diff_slice[0]["context"]
     num_lines_a = 0
     num_lines_b = 0
 
@@ -493,8 +531,8 @@ def print_range_header(diff_slice):
             num_lines_b += 1
 
     print(
-        "> @@ -{},{} +{},{} @@".format(
-            line_start_a, num_lines_a, line_start_b, num_lines_b
+        "> @@ -{},{} +{},{} @@ {}".format(
+            line_start_a, num_lines_a, line_start_b, num_lines_b, context
         )
     )
 
