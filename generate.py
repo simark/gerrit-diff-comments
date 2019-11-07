@@ -107,6 +107,25 @@ class Message:
         return str(self)
 
 
+class Range:
+    @property
+    def start_line(self):
+        return self._start_line
+
+    @property
+    def end_line(self):
+        return self._end_line
+
+    @classmethod
+    def from_raw(cls, raw):
+        rng = cls()
+
+        rng._start_line = raw["start_line"]
+        rng._end_line = raw["end_line"]
+
+        return rng
+
+
 class Comment:
     @property
     def author(self):
@@ -129,6 +148,10 @@ class Comment:
         return self._line
 
     @property
+    def range(self):
+        return self._range
+
+    @property
     def path(self):
         return self._path
 
@@ -148,7 +171,11 @@ class Comment:
         comment._side = raw.get("side", "REVISION")
 
         comment._line = raw.get("line", None)
-        comment._range = raw.get("range", None)
+
+        if "range" in raw:
+            comment._range = Range.from_raw(raw["range"])
+        else:
+            comment._range = None
 
         return comment
 
@@ -487,12 +514,22 @@ def render_diff_with_comments(server, diff, comments, revision):
 
     diff_lines, line_mapping_a_to_diff, line_mapping_b_to_diff = render_diff(diff)
 
-    def comment_to_diff_idx(comment):
-        if comment.side == "PARENT":
-            return line_mapping_a_to_diff[comment.line]
+    def comment_to_diff_range_idx(comment):
+        mapping = (
+            line_mapping_a_to_diff
+            if comment.side == "PARENT"
+            else line_mapping_b_to_diff
+        )
+
+        if comment.range is not None:
+            # Range comment.
+            start = mapping[comment.range.start_line]
+            end = mapping[comment.range.end_line]
+            return start, end
         else:
-            assert comment.side == "REVISION"
-            return line_mapping_b_to_diff[comment.line]
+            # Line comment.
+            idx = mapping[comment.line]
+            return idx, idx
 
     diff_line_ranges_to_print = []
 
@@ -501,15 +538,16 @@ def render_diff_with_comments(server, diff, comments, revision):
             # It's a file comment, doesn't matter for ranges.
             continue
 
-        idx_in_diff = comment_to_diff_idx(comment)
+        start_idx_in_diff, end_idx_in_diff = comment_to_diff_range_idx(comment)
 
         # We want to print at least from this point.
-        low = max(0, idx_in_diff - 9)
+        low = max(0, start_idx_in_diff - 9)
 
         # And up to this point (exclusive).
-        high = min(len(diff_lines) - 1, idx_in_diff + 10)
+        high = min(len(diff_lines) - 1, end_idx_in_diff + 10)
 
         if len(diff_line_ranges_to_print) == 0:
+            # This is the first range we insert.
             diff_line_ranges_to_print.append((low, high))
         else:
             prev_range = diff_line_ranges_to_print[-1]
